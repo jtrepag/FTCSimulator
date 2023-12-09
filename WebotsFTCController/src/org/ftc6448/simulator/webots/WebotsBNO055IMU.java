@@ -36,8 +36,10 @@ public class WebotsBNO055IMU implements HardwareDevice,BNO055IMU {
 
 	@Override
 	public Orientation getAngularOrientation() {
-		// TODO Auto-generated method stub
-		return null;
+		double []rollPitchYaw=imu.getRollPitchYaw();
+		
+		return new Orientation(AxesReference.EXTRINSIC, AxesOrder.XYZ, org.firstinspires.ftc.robotcore.external.navigation.AngleUnit.RADIANS, (float)rollPitchYaw[0],
+				(float)rollPitchYaw[1],(float)rollPitchYaw[2],0L);
 	}
 
 	@Override

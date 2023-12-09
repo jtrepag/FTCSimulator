@@ -25,6 +25,8 @@ public class WebotsDcMotorImpl implements DcMotorEx{
 	//extra power that can be used to add drag on a motor to simulate uneven power
 	float extraPower;
 	
+	EncoderSource encoderSource;
+	
 	public WebotsDcMotorImpl(String name, Motor motor) {
 		this.motor=motor;
 		this.name=name;
@@ -32,6 +34,36 @@ public class WebotsDcMotorImpl implements DcMotorEx{
 		direction=Direction.FORWARD;
 		zeroPowerMode=ZeroPowerBehavior.BRAKE;
 		maxPower=10;
+		
+		//set a default encoder source
+		this.encoderSource=new EncoderSource() {
+			
+			@Override
+			public int getPosition() {
+				if (motor==null) {
+					return 0;
+				}
+				PositionSensor sensor=motor.getPositionSensor();
+				if (sensor==null) {
+					System.out.println("No PositionSensor defined in joint for motor "+name);
+					return 0;
+				}
+				//need a mapping probably
+				return (int)sensor.getValue();
+			}
+		};
+	}
+	
+	public static interface EncoderSource {
+		public int getPosition();
+	}
+
+	public EncoderSource getEncoderSource() {
+		return encoderSource;
+	}
+
+	public void setEncoderSource(EncoderSource encoderSource) {
+		this.encoderSource = encoderSource;
 	}
 
 
@@ -54,6 +86,9 @@ public class WebotsDcMotorImpl implements DcMotorEx{
 	}
 	
 	private void internalSetPower(double inputPower) {
+		if (motor==null) {
+			return;
+		}
 		if (inputPower==0) {
 			power=0;
 			motor.setPosition(Double.POSITIVE_INFINITY);
@@ -186,13 +221,7 @@ public class WebotsDcMotorImpl implements DcMotorEx{
 
 	@Override
 	public int getCurrentPosition() {
-		PositionSensor sensor=motor.getPositionSensor();
-		if (sensor==null) {
-			System.out.println("No PositionSensor defined in joint for motor "+name);
-			return 0;
-		}
-		//need a mapping probably
-		return (int)sensor.getValue();
+		return encoderSource.getPosition();
 	}
 
 	@Override
@@ -239,9 +268,15 @@ public class WebotsDcMotorImpl implements DcMotorEx{
 
 	@Override
 	public double getVelocity() {
-		// TODO Auto-generated method stub
-		return 0;
+		return adjustAngularRate(motor.getVelocity());
 	}
+	
+
+    protected double adjustAngularRate(double angularRate)
+    {
+    	if (direction == Direction.REVERSE) angularRate = -angularRate;
+    	return angularRate;
+    }
 
 	@Override
 	public double getVelocity(AngleUnit unit) {

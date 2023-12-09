@@ -4,6 +4,7 @@ import java.util.Properties;
 
 import org.ftc6448.simulator.Controller;
 import org.ftc6448.simulator.PlatformSupport;
+import org.ftc6448.simulator.webots.WebotsDcMotorImpl.EncoderSource;
 
 import com.cyberbotics.webots.controller.Device;
 import com.cyberbotics.webots.controller.GPS;
@@ -14,9 +15,11 @@ import com.cyberbotics.webots.controller.PositionSensor;
 import com.cyberbotics.webots.controller.Supervisor;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
+import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareDevice;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.ServoImplEx;
 import com.studiohartman.jamepad.ControllerManager;
 
 public class OpModeController implements Controller {
@@ -30,14 +33,19 @@ public class OpModeController implements Controller {
 	protected GamepadSupport gamepadSupport;
 	protected ControllerManager controllerManager;
 	
+	boolean disableController;
+	
 	public OpModeController(Supervisor supervisor,OpMode opMode,Properties properties) {
 		this.opMode = opMode;
 		this.supervisor=supervisor;
+		this.disableController="true".equalsIgnoreCase(properties.getProperty("emulateGamepadsWithKeyboard"));
 		this.properties=properties;
 		// get the time step of the current world.
 		timeStep = (int) Math.round(supervisor.getBasicTimeStep());
 		System.out.println("timeStep " + timeStep);
 	
+		System.out.println("Disable gamepads "+this.disableController);
+		
 		opMode.gamepad1=new Gamepad();
 		opMode.gamepad2=new Gamepad();
 		
@@ -48,10 +56,11 @@ public class OpModeController implements Controller {
 		keyboard = new Keyboard();
 		keyboard.enable(timeStep);
 		
-		controllerManager = new ControllerManager();
-		controllerManager.initSDLGamepad();
-		
-		gamepadSupport=new GamepadSupport(properties, controllerManager);
+		if (!disableController) {
+			controllerManager = new ControllerManager();
+			controllerManager.initSDLGamepad();
+			gamepadSupport=new GamepadSupport(properties, controllerManager);
+		}
 		
 		initializeDevices();
 		opMode.internalPreInit();
@@ -64,6 +73,7 @@ public class OpModeController implements Controller {
 	private void initializeDevices() {
 		final HardwareMap hardwareMap=new HardwareMap();
 		opMode.hardwareMap=hardwareMap;
+		hardwareMap.voltageSensor.put("LynxVoltageSensor", new WebotsVoltageSensor());
 		
 		
 		//load all motors into the hardware motor map
@@ -127,8 +137,69 @@ public class OpModeController implements Controller {
 					hardwareMap.dcMotor.put(mappedName, webotsMotor);	
 				}
 			}		
+		}
+		
+		//look for gps last, so we can connect it with a motor if needed
+		for (int i=0;i<supervisor.getNumberOfDevices();i++) {
+			Device device=supervisor.getDeviceByIndex(i);
 			
-			
+			if (device instanceof GPS) {
+				//only one imu is supported
+				System.out.println(device+" is GPS");
+				GPS gps=(GPS)device;
+				gps.enable(timeStep);
+				
+				WebotsBNO055IMU imu=(WebotsBNO055IMU)hardwareMap.get("imu");
+				if (imu==null) {
+					throw new RuntimeException("Odometry pods require an InertialUnit sensor named imu");
+				}
+
+				String mappedName=properties.getProperty(device.getName());
+				if (mappedName!=null) {
+					System.out.println("Loading webots GPS " + device.getName()+" as "+mappedName);
+				}
+				else {
+					mappedName=device.getName();
+					System.out.println("Loading webots GPS " + mappedName);
+				}
+
+				String motor=properties.getProperty(mappedName+".motor");
+				boolean vertical="true".equalsIgnoreCase(properties.getProperty(mappedName+".vertical"));
+				
+				HardwareDevice existingDevice=hardwareMap.get(motor);
+				if (existingDevice==null) {
+					existingDevice=new WebotsDcMotorImpl(motor,null);
+	    			hardwareMap.put(motor, existingDevice);
+					System.out.println("Mapping odometry device "+mappedName+" to non-existent motor "+motor);
+				}
+				else {
+					if (!(existingDevice instanceof DcMotor)) {
+						throw new RuntimeException(motor+" is not a motor.  Cannot map an odometry encoder to it.");
+					}
+					System.out.println("Mapping odometry device "+mappedName+" to motor "+motor);
+				}
+				
+
+		        double inPerTick = (1.888*Math.PI)/2000;
+
+				String ticksPerInch=properties.getProperty(mappedName+".inchesPerTick");
+				
+				if (ticksPerInch==null||ticksPerInch.trim().length()==0) {
+					System.out.println("No property found for "+mappedName+".inchesPerTick"+", so using "+inPerTick+" as default");
+					ticksPerInch=Double.toString(inPerTick);
+				}
+				final WebotsOdometryPod odometryPod=new WebotsOdometryPod(imu,gps,vertical,Double.parseDouble(ticksPerInch));
+				
+				WebotsDcMotorImpl motorImpl=(WebotsDcMotorImpl)existingDevice;
+				motorImpl.setEncoderSource(new EncoderSource() {
+					
+					@Override
+					public int getPosition() {
+						return odometryPod.getPosition();
+					}
+				});
+				
+			}
 		}
 		
 		//add any missing motors
@@ -139,13 +210,13 @@ public class OpModeController implements Controller {
 	    		String device=property.substring(0,property.length()-5);
 	    		String type=properties.getProperty(property);
 	    		if ("servo".equalsIgnoreCase(type)) {
-	    			webotsDevice=new WebotsServo();
+	    			webotsDevice=new ServoImplEx(device,null);
 	    		}
 	    		else if ("continuousServo".equalsIgnoreCase(type)) {
 	    			webotsDevice=new WebotsContinuousServo();
 	    		}
 	    		else if ("motor".equalsIgnoreCase(type)) {
-	    			webotsDevice=new WebotsDcMotor(device);
+	    			webotsDevice=new WebotsDcMotorImpl(device,null);
 	    		}
 	    		else if ("distance".equalsIgnoreCase(type)) {
 	    			webotsDevice=new WebotsDistanceSensor(device);
@@ -225,7 +296,7 @@ public class OpModeController implements Controller {
 
 	private void handleGamepads(boolean useKeyboard) {
 		
-		if (!useKeyboard) {
+		if (!useKeyboard &&!disableController) {
 			gamepadSupport.processJoystick(opMode.gamepad1, opMode.gamepad2);
 		}
 		else {
@@ -256,7 +327,9 @@ public class OpModeController implements Controller {
 	@Override
 	public void cleanup() {
 		opMode.stop();
-		controllerManager.quitSDLGamepad();
+		if (!disableController) {
+			controllerManager.quitSDLGamepad();
+		}
 	}
 
 }

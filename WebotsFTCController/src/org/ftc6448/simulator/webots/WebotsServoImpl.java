@@ -3,8 +3,6 @@ package org.ftc6448.simulator.webots;
 import org.ftc6448.utils.NumberUtils;
 
 import com.cyberbotics.webots.controller.Motor;
-import com.cyberbotics.webots.controller.PositionSensor;
-import com.github.javaparser.Position;
 import com.qualcomm.robotcore.hardware.Servo;
 
 public class WebotsServoImpl implements Servo {
@@ -67,6 +65,9 @@ public class WebotsServoImpl implements Servo {
 
 	@Override
 	public void setPosition(double position) {
+		if (motor==null) {
+			return;
+		}
 		double max=motor.getMaxPosition();
 		double min=motor.getMinPosition();
 
@@ -77,6 +78,9 @@ public class WebotsServoImpl implements Servo {
 
 	@Override
 	public double getPosition() {
+		if (motor==null) {
+			return 0;
+		}
 		//Qualcomm does this, so do the same
 		return motor.getTargetPosition();
 	}
